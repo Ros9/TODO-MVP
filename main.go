@@ -17,6 +17,8 @@ type Activity struct{
 	ID primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
 	Name string `json:"name" bson:"name"`
 	Date string `json:"date" bson:"date"`
+	End bool `json:"end" bson:"end"`
+	Need bool `json:"need" bson:"need"`
 }
 
 var(
@@ -48,13 +50,21 @@ func addActivity(w http.ResponseWriter, r *http.Request){
 		var activity Activity
 		activity.Name = result
 		activity.Date = time.Now().Format("2006.01.02 15:04:05")
+		activity.Need = false
 		collection := client.Database("test").Collection("activities")
+		_, err := collection.UpdateMany(
+			context.TODO(),
+			bson.M{"need": "1"},
+			bson.D{
+				{"$set", bson.D{{"need", false}}},
+			},
+		)
 		_, err = collection.InsertOne(context.TODO(), activity)
 		if err != nil {
 			fmt.Println(err.Error())
 		}
+		http.Redirect(w, r, "/TODO", 301)
 	}
-	http.Redirect(w, r, "/TODO", 301)
 }
 
 func deleteActivity(w http.ResponseWriter, r *http.Request){
@@ -66,16 +76,58 @@ func deleteActivity(w http.ResponseWriter, r *http.Request){
 	action := r.FormValue("delete")
 	if len(action) > 0 {
 		collection := client.Database("test").Collection("activities")
-		_, err := collection.DeleteOne(context.TODO(), bson.M{"name": result})
+		_, err := collection.UpdateMany(
+			context.TODO(),
+			bson.M{"need": true},
+			bson.D{
+				{"$set", bson.D{{"need", false}}},
+			},
+		)
+		_, err = collection.UpdateOne(
+			context.TODO(),
+			bson.M{"name": result},
+			bson.D{
+				{"$set", bson.D{{"end", true}}},
+			},
+		)
 		if err != nil{
 			fmt.Println(err.Error())
 		}
+		http.Redirect(w, r, "/TODO", 301)
 	}
-	http.Redirect(w, r, "/TODO", 301)
 }
 
-func searchActivity(){
-
+func searchActivity(w http.ResponseWriter, r *http.Request){
+	err := r.ParseMultipartForm(200000)
+	if err != nil {
+		log.Println(err)
+	}
+	result := r.FormValue("activity")
+	action := r.FormValue("search")
+	if len(action) > 0 {
+		collection := client.Database("test").Collection("activities")
+		_, err := collection.UpdateMany(
+			context.TODO(),
+			bson.M{"need": true},
+			bson.D{
+				{"$set", bson.D{{"need", false}}},
+			},
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		filter := bson.D{{"name", result}}
+		update := bson.D{
+			{"$set", bson.D{
+				{"need", true},
+			}},
+		}
+		_, err = collection.UpdateOne(context.TODO(), filter, update)
+		if err != nil {
+			log.Fatal(err)
+		}
+		http.Redirect(w, r, "/TODO", 301)
+	}
 }
 
 func stableMainPage(w http.ResponseWriter, r *http.Request){
@@ -92,12 +144,20 @@ func stableMainPage(w http.ResponseWriter, r *http.Request){
 	}
 	temp, _ := template.ParseFiles("assets/index.html")
 	temp.Execute(w, data)
+	_, err = collection.UpdateMany(
+		context.TODO(),
+		bson.M{"need": true},
+		bson.D{
+			{"$set", bson.D{{"need", false}}},
+		},
+	)
 }
 
 func drawMainPage(w http.ResponseWriter, r *http.Request){
 	if r.Method == "POST"{
 		addActivity(w, r)
 		deleteActivity(w, r)
+		searchActivity(w, r)
 	} else{
 		stableMainPage(w, r)
 	}

@@ -7,21 +7,35 @@
 	<link rel="stylesheet" type="text/css" href="assets/styles.css">
 </head>
 <body>
-	<form method="post" enctype="multipart/form-data" id="content">
-		<p>
-			<input type="text" size="20" name="activity">
-			<button type="submit" class="btn btn-success" value="add" name="add">Add</button>
-			<button type="submit" class="btn btn-danger" value="delete" name="delete">Delete</button>
-			<button type="submit" class="btn btn-info" value="search" name="search">Search</button>
-		</p>
-	</form>
-	<div id="">
+	<div id="inputs">
+		<form method="post" enctype="multipart/form-data">
+			<p>
+				<input type="text" size="20" name="activity">
+				<button type="submit" class="btn btn-success" value="add" name="add">Add</button>
+				<button type="submit" class="btn btn-danger" value="delete" name="delete">Delete</button>
+				<button type="submit" class="btn btn-secondary" value="search" name="search">Search</button>
+			</p>
+		</form>
+	</div>
+	<div id="content">
 		<ul class="list-group">
 			{{range .}}
-				<li class="list-group-item list-group-item-warning">
-					<h5>{{.Name}}</h5>
-					<h6>{{.Date}}</h6>
-				</li>
+					{{if .Need}}
+						<li class="list-group-item list-group-item-dark">
+							<h4>{{.Name}}</h4>
+							<h5>{{.Date}}</h5>
+						</li>
+					{{else if .End}}
+						<li class="list-group-item list-group-item-danger">
+							<h4>{{.Name}}</h4>
+							<h5>{{.Date}}</h5>
+						</li>
+					{{else}}
+						<li class="list-group-item list-group-item-success">
+							<h4>{{.Name}}</h4>
+							<h5>{{.Date}}</h5>
+						</li>
+					{{end}}
 			{{end}}
 		</ul>
 	</div>
