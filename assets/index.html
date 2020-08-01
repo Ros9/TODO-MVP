@@ -2,15 +2,28 @@
 <html>
 <head>
 	<title>TODO</title>
+	<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css" integrity="sha384-9aIt2nRpC12Uk9gS9baDl411NQApFmC26EwAOH8WgZl5MYYxFfc+NcPb1dKGj7Sk" crossorigin="anonymous">
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
 	<link rel="stylesheet" type="text/css" href="assets/styles.css">
 </head>
 <body>
 	<form method="post" enctype="multipart/form-data" id="content">
-		<input type="text" name="activity">
-    	<button type="submit">Add</button>
+		<p>
+			<input type="text" size="20" name="activity">
+			<button type="submit" class="btn btn-success" value="add" name="add">Add</button>
+			<button type="submit" class="btn btn-danger" value="delete" name="delete">Delete</button>
+			<button type="submit" class="btn btn-info" value="search" name="search">Search</button>
+		</p>
 	</form>
-	<div id="content">
-		{{.}}
+	<div id="">
+		<ul class="list-group">
+			{{range .}}
+				<li class="list-group-item list-group-item-warning">
+					<h5>{{.Name}}</h5>
+					<h6>{{.Date}}</h6>
+				</li>
+			{{end}}
+		</ul>
 	</div>
 </body>
 </html>
