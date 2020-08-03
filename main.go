@@ -17,8 +17,6 @@ type Activity struct{
 	ID primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
 	Name string `json:"name" bson:"name"`
 	Date string `json:"date" bson:"date"`
-	End bool `json:"end" bson:"end"`
-	Need bool `json:"need" bson:"need"`
 }
 
 var(
@@ -35,129 +33,106 @@ func initMongo() (*mongo.Client, error){
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Connected to MongoDB = true")
+	fmt.Println("Connection to MongoDB = true")
 	return client, nil
 }
 
-func addActivity(w http.ResponseWriter, r *http.Request){
-	err := r.ParseMultipartForm(200000)
+func addActivity(param string){
+	var activity Activity
+	activity.Name = param
+	activity.Date = time.Now().Format("2006.01.02 15:04:05")
+	collection := client.Database("test").Collection("activities")
+	_, err := collection.InsertOne(context.TODO(), activity)
 	if err != nil {
-		log.Println(err)
-	}
-	result := r.FormValue("activity")
-	action := r.FormValue("add")
-	if len(action) > 0 {
-		var activity Activity
-		activity.Name = result
-		activity.Date = time.Now().Format("2006.01.02 15:04:05")
-		activity.Need = false
-		collection := client.Database("test").Collection("activities")
-		_, err := collection.UpdateMany(
-			context.TODO(),
-			bson.M{"need": "1"},
-			bson.D{
-				{"$set", bson.D{{"need", false}}},
-			},
-		)
-		_, err = collection.InsertOne(context.TODO(), activity)
-		if err != nil {
-			fmt.Println(err.Error())
-		}
-		http.Redirect(w, r, "/TODO", 301)
+		fmt.Println(err.Error())
 	}
 }
 
-func deleteActivity(w http.ResponseWriter, r *http.Request){
-	err := r.ParseMultipartForm(200000)
-	if err != nil {
-		log.Println(err)
+func deleteActivity(param string){
+	collection := client.Database("test").Collection("activities")
+	_, err := collection.DeleteOne(context.TODO(), bson.D{{"name", param}})
+	if err != nil{
+		fmt.Println(err.Error())
 	}
-	result := r.FormValue("activity")
-	action := r.FormValue("delete")
-	if len(action) > 0 {
+}
+
+func searchActivity(w http.ResponseWriter, param string){
+	collection := client.Database("test").Collection("activities")
+	answer, _ := collection.Find(context.TODO(), bson.D{{"name", param}})
+	defer answer.Close(context.TODO())
+	activities := readActivitiesFromCursor(answer)
+	renderList(w, activities)
+}
+
+func editActivity(w http.ResponseWriter, r *http.Request){
+	if r.Method == "POST"{
+		url := r.URL.String()
+		activity :=r.FormValue("activity")
+		objectId, err := primitive.ObjectIDFromHex(url[31:55])
+		if err != nil{
+			fmt.Println(err.Error())
+		}
 		collection := client.Database("test").Collection("activities")
-		_, err := collection.UpdateMany(
-			context.TODO(),
-			bson.M{"need": true},
-			bson.D{
-				{"$set", bson.D{{"need", false}}},
-			},
-		)
+		date := time.Now().Format("2006.01.02 15:04:05")
 		_, err = collection.UpdateOne(
 			context.TODO(),
-			bson.M{"name": result},
+			bson.D{{"_id", objectId}},
 			bson.D{
-				{"$set", bson.D{{"end", true}}},
+				{"$set", bson.D{{"name", activity}}},
+				{"$set", bson.D{{"date", date}}},
 			},
 		)
 		if err != nil{
 			fmt.Println(err.Error())
 		}
-		http.Redirect(w, r, "/TODO", 301)
+		http.Redirect(w, r, "/TODO",301)
+	} else{
+		temp, _ := template.ParseFiles("assets/editActivity.html")
+		temp.Execute(w, "")
 	}
 }
 
-func searchActivity(w http.ResponseWriter, r *http.Request){
-	err := r.ParseMultipartForm(200000)
-	if err != nil {
-		log.Println(err)
-	}
-	result := r.FormValue("activity")
-	action := r.FormValue("search")
-	if len(action) > 0 {
-		collection := client.Database("test").Collection("activities")
-		_, err := collection.UpdateMany(
-			context.TODO(),
-			bson.M{"need": true},
-			bson.D{
-				{"$set", bson.D{{"need", false}}},
-			},
-		)
-		if err != nil {
+func readActivitiesFromCursor(cursor *mongo.Cursor) []Activity{
+	var data []Activity
+	for cursor.Next(context.TODO()) {
+		var activity Activity
+		if err := cursor.Decode(&activity); err != nil {
 			log.Fatal(err)
 		}
-		filter := bson.D{{"name", result}}
-		update := bson.D{
-			{"$set", bson.D{
-				{"need", true},
-			}},
-		}
-		_, err = collection.UpdateOne(context.TODO(), filter, update)
-		if err != nil {
-			log.Fatal(err)
-		}
-		http.Redirect(w, r, "/TODO", 301)
+		data = append(data, activity)
 	}
+	return data
+}
+
+func renderList(w http.ResponseWriter, activities []Activity){
+	temp, _ := template.ParseFiles("assets/index.html")
+	temp.Execute(w, activities)
 }
 
 func stableMainPage(w http.ResponseWriter, r *http.Request){
 	collection := client.Database("test").Collection("activities")
 	cursor, err := collection.Find(context.TODO(), bson.M{})
-	var data []Activity
 	defer cursor.Close(context.TODO())
-	for cursor.Next(context.TODO()) {
-		var activity Activity
-		if err = cursor.Decode(&activity); err != nil {
-			log.Fatal(err)
-		}
-		data = append(data, activity)
+	if err != nil{
+		fmt.Println(err.Error())
 	}
-	temp, _ := template.ParseFiles("assets/index.html")
-	temp.Execute(w, data)
-	_, err = collection.UpdateMany(
-		context.TODO(),
-		bson.M{"need": true},
-		bson.D{
-			{"$set", bson.D{{"need", false}}},
-		},
-	)
+	data := readActivitiesFromCursor(cursor)
+	renderList(w, data)
 }
 
 func drawMainPage(w http.ResponseWriter, r *http.Request){
 	if r.Method == "POST"{
-		addActivity(w, r)
-		deleteActivity(w, r)
-		searchActivity(w, r)
+		action := r.FormValue("action")
+		activity := r.FormValue("activity")
+		if action == "search"{
+			searchActivity(w, activity)
+		} else if action == "add"{
+			addActivity(activity)
+			http.Redirect(w, r, "/TODO",301)
+		} else if action == "delete"{
+			deleteActivity(activity)
+			http.Redirect(w, r, "/TODO",301)
+		}
 	} else{
 		stableMainPage(w, r)
 	}
@@ -166,6 +141,7 @@ func drawMainPage(w http.ResponseWriter, r *http.Request){
 func main(){
 	fmt.Println(time.Now().Format("2006.01.02 15:04:05"))
 	http.HandleFunc("/TODO", drawMainPage)
+	http.HandleFunc("/editActivity", editActivity)
 	http.Handle("/assets/", http.StripPrefix("/assets", http.FileServer(http.Dir("./assets"))))
 	fmt.Println("Server is listening...")
 	http.ListenAndServe(":9000", nil)
