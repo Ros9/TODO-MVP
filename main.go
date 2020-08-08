@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/bxcodec/faker"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -14,9 +15,17 @@ import (
 )
 
 type Activity struct{
-	ID primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
-	Name string `json:"name" bson:"name"`
-	Date string `json:"date" bson:"date"`
+	ID primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty" faker:"-"`
+	SimpleID string `json:"simple_id" faker:"-"`
+	Name string `json:"name" bson:"name" faker:"len=10"`
+	DateOfCreation string `json:"date_of_creation" bson:"date_of_creation" faker:"-"`
+	DateOfUpdate string `json:"date_of_update" bson:"date_of_update" faker:"-"`
+	Flag bool `json:"flag" bson:"flag" faker:"-"`
+}
+
+type DataOnPage struct{
+	Quantity int64
+	Activities []Activity
 }
 
 var(
@@ -37,20 +46,27 @@ func initMongo() (*mongo.Client, error){
 	return client, nil
 }
 
+func getNowTime() string{
+	return time.Now().Format("2006.01.02 15:04:05")
+}
+
 func addActivity(param string){
-	var activity Activity
-	activity.Name = param
-	activity.Date = time.Now().Format("2006.01.02 15:04:05")
-	collection := client.Database("test").Collection("activities")
-	_, err := collection.InsertOne(context.TODO(), activity)
-	if err != nil {
-		fmt.Println(err.Error())
-	}
+	activities := make([]Activity, 1)
+	activities[0].Name = param
+	timeNow := getNowTime()
+	activities[0].DateOfCreation = timeNow
+	activities[0].DateOfUpdate = timeNow
+	activities[0].Flag = false
+	uploadActivitiesToDataBase(activities)
 }
 
 func deleteActivity(param string){
+	id, err := primitive.ObjectIDFromHex(param)
+	if err != nil{
+		fmt.Println(err.Error())
+	}
 	collection := client.Database("test").Collection("activities")
-	_, err := collection.DeleteOne(context.TODO(), bson.D{{"name", param}})
+	_, err = collection.DeleteOne(context.TODO(), bson.D{{"_id", id}})
 	if err != nil{
 		fmt.Println(err.Error())
 	}
@@ -60,26 +76,25 @@ func searchActivity(w http.ResponseWriter, param string){
 	collection := client.Database("test").Collection("activities")
 	answer, _ := collection.Find(context.TODO(), bson.D{{"name", param}})
 	defer answer.Close(context.TODO())
-	activities := readActivitiesFromCursor(answer)
-	renderList(w, activities)
+	data := DataOnPage{
+		Quantity: calculateQuantityActivities(),
+		Activities: readActivitiesFromCursor(answer),
+	}
+	renderData(w, data)
 }
 
 func editActivity(w http.ResponseWriter, r *http.Request){
+	id, _ := primitive.ObjectIDFromHex(r.URL.Query().Get("id"))
+	collection := client.Database("test").Collection("activities")
 	if r.Method == "POST"{
-		url := r.URL.String()
-		activity :=r.FormValue("activity")
-		objectId, err := primitive.ObjectIDFromHex(url[31:55])
-		if err != nil{
-			fmt.Println(err.Error())
-		}
-		collection := client.Database("test").Collection("activities")
-		date := time.Now().Format("2006.01.02 15:04:05")
-		_, err = collection.UpdateOne(
+		text := r.FormValue("activity")
+		date := getNowTime()
+		_, err := collection.UpdateOne(
 			context.TODO(),
-			bson.D{{"_id", objectId}},
+			bson.D{{"_id", id}},
 			bson.D{
-				{"$set", bson.D{{"name", activity}}},
-				{"$set", bson.D{{"date", date}}},
+				{"$set", bson.D{{"name", text}}},
+				{"$set", bson.D{{"date_of_update", date}}},
 			},
 		)
 		if err != nil{
@@ -87,8 +102,44 @@ func editActivity(w http.ResponseWriter, r *http.Request){
 		}
 		http.Redirect(w, r, "/TODO",301)
 	} else{
+		var data Activity
+		err := collection.FindOne(context.TODO(), bson.D{{"_id", id}}).Decode(&data)
+		if err != nil{
+			http.Redirect(w, r, "/TODO",301)
+			return
+		}
 		temp, _ := template.ParseFiles("assets/editActivity.html")
-		temp.Execute(w, "")
+		temp.Execute(w, data)
+	}
+}
+
+func calculateQuantityActivities() int64{
+	collection := client.Database("test").Collection("activities")
+	quantity, _ := collection.CountDocuments(context.Background(), bson.D{})
+	return quantity
+}
+
+func changePriorityOfActivity(w http.ResponseWriter, param string){
+	id, err := primitive.ObjectIDFromHex(param)
+	if err != nil{
+		fmt.Println(err.Error())
+	}
+	collection := client.Database("test").Collection("activities")
+	cursor, err := collection.Find(context.TODO(), bson.D{{"_id", id}})
+	if err != nil{
+		fmt.Println(err.Error())
+	}
+	activities := make([]Activity, 1)
+	activities = readActivitiesFromCursor(cursor)
+	_, err = collection.UpdateOne(
+		context.TODO(),
+		bson.D{{"_id", id}},
+		bson.D{
+			{"$set", bson.D{{"flag", !activities[0].Flag}}},
+		},
+	)
+	if err != nil{
+		fmt.Println(err.Error())
 	}
 }
 
@@ -99,14 +150,15 @@ func readActivitiesFromCursor(cursor *mongo.Cursor) []Activity{
 		if err := cursor.Decode(&activity); err != nil {
 			log.Fatal(err)
 		}
+		activity.SimpleID = activity.ID.Hex()
 		data = append(data, activity)
 	}
 	return data
 }
 
-func renderList(w http.ResponseWriter, activities []Activity){
+func renderData(w http.ResponseWriter, data DataOnPage){
 	temp, _ := template.ParseFiles("assets/index.html")
-	temp.Execute(w, activities)
+	temp.Execute(w, data)
 }
 
 func stableMainPage(w http.ResponseWriter, r *http.Request){
@@ -116,21 +168,27 @@ func stableMainPage(w http.ResponseWriter, r *http.Request){
 	if err != nil{
 		fmt.Println(err.Error())
 	}
-	data := readActivitiesFromCursor(cursor)
-	renderList(w, data)
+	data := DataOnPage{
+		Quantity: calculateQuantityActivities(),
+		Activities: readActivitiesFromCursor(cursor),
+	}
+	renderData(w, data)
 }
 
 func drawMainPage(w http.ResponseWriter, r *http.Request){
 	if r.Method == "POST"{
 		action := r.FormValue("action")
-		activity := r.FormValue("activity")
+		param := r.FormValue("activity_param")
 		if action == "search"{
-			searchActivity(w, activity)
+			searchActivity(w, param)
 		} else if action == "add"{
-			addActivity(activity)
+			addActivity(param)
 			http.Redirect(w, r, "/TODO",301)
 		} else if action == "delete"{
-			deleteActivity(activity)
+			deleteActivity(param)
+			http.Redirect(w, r, "/TODO",301)
+		} else if action == "move_activity"{
+			changePriorityOfActivity(w, param)
 			http.Redirect(w, r, "/TODO",301)
 		}
 	} else{
@@ -138,8 +196,40 @@ func drawMainPage(w http.ResponseWriter, r *http.Request){
 	}
 }
 
+func uploadActivitiesToDataBase(activities []Activity){
+	collection := client.Database("test").Collection("activities")
+	for i:=0; i<len(activities); i++{
+		_, err := collection.InsertOne(context.TODO(), activities[i])
+		if err != nil{
+			fmt.Println(err.Error())
+			return
+		}
+	}
+}
+
+func launcherOfFaker(){
+	fmt.Println("Press to [1] for upload fake data to TODO, or [2] for nothing...")
+	var flag int
+	fmt.Scanf("%d", &flag)
+	if flag == 1 {
+		activities := make([]Activity, 20)
+		for i:=0; i<20; i++{
+			var activity Activity
+			err := faker.FakeData(&activity)
+			if err != nil{
+				fmt.Println(err.Error())
+				return
+			}
+			activity.DateOfCreation = getNowTime()
+			activity.DateOfUpdate = getNowTime()
+			activities[i] = activity
+		}
+		uploadActivitiesToDataBase(activities)
+	}
+}
+
 func main(){
-	fmt.Println(time.Now().Format("2006.01.02 15:04:05"))
+	launcherOfFaker()
 	http.HandleFunc("/TODO", drawMainPage)
 	http.HandleFunc("/editActivity", editActivity)
 	http.Handle("/assets/", http.StripPrefix("/assets", http.FileServer(http.Dir("./assets"))))
