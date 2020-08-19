@@ -3,14 +3,20 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/bxcodec/faker"
+	"github.com/bxcodec/faker/v3"
+	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"html/template"
+	"io"
 	"log"
+	"math/rand"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -21,16 +27,35 @@ type Activity struct{
 	DateOfCreation string `json:"date_of_creation" bson:"date_of_creation" faker:"-"`
 	DateOfUpdate string `json:"date_of_update" bson:"date_of_update" faker:"-"`
 	Flag bool `json:"flag" bson:"flag" faker:"-"`
+	ImageSrc string `json:"image_src" bson:"image_src" faker:"-"`
 }
 
 type DataOnPage struct{
 	Quantity int64
 	Activities []Activity
+	NowPage int
+	Pages [5]int
 }
+
+const ImageHostPath = "/home/abdrasul/Development/images/"
 
 var(
 	client, _ = initMongo()
 )
+
+func getMin(x, y int) int{
+	if x > y{
+		return y
+	}
+	return x
+}
+
+func getMax(x, y int) int{
+	if x > y{
+		return x
+	}
+	return y
+}
 
 func initMongo() (*mongo.Client, error){
 	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
@@ -100,12 +125,12 @@ func editActivity(w http.ResponseWriter, r *http.Request){
 		if err != nil{
 			fmt.Println(err.Error())
 		}
-		http.Redirect(w, r, "/TODO",301)
+		http.Redirect(w, r, "/TODO/page/1",301)
 	} else{
 		var data Activity
 		err := collection.FindOne(context.TODO(), bson.D{{"_id", id}}).Decode(&data)
 		if err != nil{
-			http.Redirect(w, r, "/TODO",301)
+			http.Redirect(w, r, "/TODO/page/1",301)
 			return
 		}
 		temp, _ := template.ParseFiles("assets/editActivity.html")
@@ -115,7 +140,7 @@ func editActivity(w http.ResponseWriter, r *http.Request){
 
 func calculateQuantityActivities() int64{
 	collection := client.Database("test").Collection("activities")
-	quantity, _ := collection.CountDocuments(context.Background(), bson.D{})
+	quantity, _ := collection.EstimatedDocumentCount(context.TODO())
 	return quantity
 }
 
@@ -161,38 +186,113 @@ func renderData(w http.ResponseWriter, data DataOnPage){
 	temp.Execute(w, data)
 }
 
-func stableMainPage(w http.ResponseWriter, r *http.Request){
+func renderDataOnPage(w http.ResponseWriter, data DataOnPage, param string){
+	temp, _ := template.ParseFiles("assets/index.html")
+	temp.Execute(w, data)
+}
+
+func stableMainPage(w http.ResponseWriter, r *http.Request, param string){
+	start := time.Now()
+	page, err := strconv.Atoi(param)
+	if err != nil{
+		fmt.Println(err.Error())
+	}
+	maxPage := int(calculateQuantityActivities() + 9) / 10
+	if page > maxPage {
+		redirectPage := "/TODO/page/" + strconv.Itoa(maxPage)
+		http.Redirect(w, r, redirectPage, 301)
+	}
 	collection := client.Database("test").Collection("activities")
-	cursor, err := collection.Find(context.TODO(), bson.M{})
+	skip := int64((page - 1) * 10)
+	limit := int64(10)
+	options := options.Find()
+	options.SetSkip(skip)
+	options.SetLimit(limit)
+	cursor, err := collection.Find(context.TODO(), bson.M{}, options)
 	defer cursor.Close(context.TODO())
 	if err != nil{
 		fmt.Println(err.Error())
 	}
 	data := DataOnPage{
-		Quantity: calculateQuantityActivities(),
+		Quantity:   calculateQuantityActivities(),
 		Activities: readActivitiesFromCursor(cursor),
+		NowPage: page,
 	}
-	renderData(w, data)
+	for i:=2; i>=0; i--{
+		if page - i > 0{
+			data.Pages[2-i] = page - i
+		}
+	}
+	for i:=1; i<=2; i++{
+		if maxPage >= page + i{
+			data.Pages[2+i] = page + i
+		}
+	}
+	renderDataOnPage(w, data, param)
+	duration := time.Since(start)
+	fmt.Println(duration)
+}
+
+func generateMD5(param string) string{
+	return param + strconv.Itoa(time.Now().Second()) + strconv.Itoa(rand.Intn(128))
+}
+
+func uploadImage(param string, file multipart.File, handler *multipart.FileHeader){
+	collection := client.Database("test").Collection("activities")
+	id, err := primitive.ObjectIDFromHex(param)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	imageSrc := generateMD5(param) + handler.Filename
+	collection.UpdateOne(
+		context.TODO(),
+		bson.D{{"_id", id}},
+		bson.D{
+			{"$set", bson.D{{"image_src", imageSrc}}},
+		},
+	)
+	dir := ImageHostPath + imageSrc
+	out, err := os.Create(dir)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	defer out.Close()
+	_, err = io.Copy(out, file)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	defer out.Close()
 }
 
 func drawMainPage(w http.ResponseWriter, r *http.Request){
+	vars := mux.Vars(r)
 	if r.Method == "POST"{
 		action := r.FormValue("action")
 		param := r.FormValue("activity_param")
+		redirectPage := "/TODO/page/" + vars["id"]
 		if action == "search"{
 			searchActivity(w, param)
 		} else if action == "add"{
 			addActivity(param)
-			http.Redirect(w, r, "/TODO",301)
+			http.Redirect(w, r, redirectPage,301)
 		} else if action == "delete"{
 			deleteActivity(param)
-			http.Redirect(w, r, "/TODO",301)
+			http.Redirect(w, r, redirectPage,301)
 		} else if action == "move_activity"{
 			changePriorityOfActivity(w, param)
-			http.Redirect(w, r, "/TODO",301)
+			http.Redirect(w, r, redirectPage,301)
+		} else if action == "add_image"{
+			file, handler, err := r.FormFile("activity_file")
+			if err != nil {
+				fmt.Println(err.Error())
+				return
+			}
+			defer file.Close()
+			uploadImage(param, file, handler)
+			http.Redirect(w, r, redirectPage,301)
 		}
 	} else{
-		stableMainPage(w, r)
+		stableMainPage(w, r, vars["id"])
 	}
 }
 
@@ -207,32 +307,38 @@ func uploadActivitiesToDataBase(activities []Activity){
 	}
 }
 
-func launcherOfFaker(){
-	fmt.Println("Press to [1] for upload fake data to TODO, or [2] for nothing...")
-	var flag int
-	fmt.Scanf("%d", &flag)
-	if flag == 1 {
-		activities := make([]Activity, 20)
-		for i:=0; i<20; i++{
-			var activity Activity
-			err := faker.FakeData(&activity)
-			if err != nil{
-				fmt.Println(err.Error())
-				return
-			}
-			activity.DateOfCreation = getNowTime()
-			activity.DateOfUpdate = getNowTime()
-			activities[i] = activity
-		}
-		uploadActivitiesToDataBase(activities)
+func createFakeData(w http.ResponseWriter, r *http.Request){
+	vars := mux.Vars(r)
+	quantity, err := strconv.Atoi(vars["quantity"])
+	if err != nil{
+		fmt.Println(err.Error())
+		return
 	}
+	activities := make([]Activity, quantity)
+	for i:=0; i<quantity; i++{
+		var activity Activity
+		err := faker.FakeData(&activity)
+		if err != nil{
+			fmt.Println(err.Error())
+			return
+		}
+		activity.DateOfCreation = getNowTime()
+		activity.DateOfUpdate = getNowTime()
+		activities[i] = activity
+	}
+	uploadActivitiesToDataBase(activities)
+	http.Redirect(w, r, "/TODO/page/1",301)
 }
 
 func main(){
-	launcherOfFaker()
-	http.HandleFunc("/TODO", drawMainPage)
-	http.HandleFunc("/editActivity", editActivity)
+	fmt.Println(calculateQuantityActivities())
+	router := mux.NewRouter()
+	router.HandleFunc("/TODO/page/{id}", drawMainPage)
+	router.HandleFunc("/editActivity", editActivity)
+	router.HandleFunc("/TODO/createFakeData/{quantity}", createFakeData)
 	http.Handle("/assets/", http.StripPrefix("/assets", http.FileServer(http.Dir("./assets"))))
+	http.Handle("/avatars/", http.StripPrefix("/avatars/", http.FileServer(http.Dir(ImageHostPath))))
+	http.Handle("/", router)
 	fmt.Println("Server is listening...")
 	http.ListenAndServe(":9000", nil)
 }

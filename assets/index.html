@@ -1,76 +1,94 @@
 <!DOCTYPE html>
 <html>
-<head>
-	<title>TODO</title>
-	<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css" integrity="sha384-9aIt2nRpC12Uk9gS9baDl411NQApFmC26EwAOH8WgZl5MYYxFfc+NcPb1dKGj7Sk" crossorigin="anonymous">
-	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
-	<link rel="stylesheet" type="text/css" href="assets/styles.css">
-</head>
-<body>
-<div id="inputs">
-	<form method="post" enctype="multipart/form-data">
-		<p>
-			<input type="text" size="20" name="activity_param">
-			<button type="submit" class="btn btn-success" value="add" name="action">Add</button>
-			<button type="submit" class="btn btn-secondary" value="search" name="action">Search</button>
-		</p>
-	</form>
-</div>
-<div id="content">
-	<div class="alert alert-dark" role="alert">
-		<h4>Quantity of activities in TODO: {{.Quantity}}</h4>
-	</div>
-	<br>
-	<ul class="list-group">
-		<div class="alert alert-warning" role="alert">
-			<h4>Top list:</h4>
-		</div>
-		{{range .Activities}}
-			{{if .Flag}}
-				<li class="list-group-item list-group-item-warning">
-					<h4>{{.Name}}</h4>
-					<h5>Date of creation: {{.DateOfCreation}}</h5>
-					<h5>Date of update: {{.DateOfUpdate}}</h5>
-					<button type="button" class="btn btn-dark"><a href="/editActivity?id={{.SimpleID}}">Edit</a></button>
-					<form method="post" enctype="multipart/form-data">
-						<input type="hidden" value="{{.SimpleID}}" name="activity_param">
+	<head>
+		<title>TODO</title>
+		<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css" integrity="sha384-9aIt2nRpC12Uk9gS9baDl411NQApFmC26EwAOH8WgZl5MYYxFfc+NcPb1dKGj7Sk" crossorigin="anonymous">
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+		<link rel="stylesheet" type="text/css" href="/assets/styles.css">
+	</head>
+	<body>
+		<div class="container">
+			<div class="row">
+				<div class="col">
+					<div id="inputs">
+						<form method="post" enctype="multipart/form-data">
+							<p>
+								<input type="text" size="20" name="activity_param">
+								<button type="submit" class="btn btn-success" value="add" name="action">Add</button>
+								<button type="submit" class="btn btn-secondary" value="search" name="action">Search</button>
+							</p>
+						</form>
+					</div>
+					<div id="content">
+						<div class="alert alert-dark" role="alert">
+							<h4>Quantity of activities in TODO: {{.Quantity}}</h4>
+						</div>
 						<br>
-						<button type="submit" class="btn btn-danger" value="delete" name="action">Delete</button>
-						<button type="submit" class="btn btn-success" value="move_activity" name="action">Bottom</button>
-					</form>
-					<br>
-				</li>
-			{{end}}
-		{{end}}
-	</ul>
-	<br>
-	<ul class="list-group">
-		<div class="alert alert-success" role="alert">
-			<h4>Main list: </h4>
-		</div>
-		{{range .Activities}}
-			{{if .Flag}}
+						<ul class="list-group">
+							{{range .Activities}}
+								{{if .Flag}}
+									<li class="list-group-item list-group-item-warning">
+										<h4>{{.Name}}</h4>
+										<h5>Date of creation: {{.DateOfCreation}}</h5>
+										<h5>Date of update: {{.DateOfUpdate}}</h5>
+										<button type="button" class="btn btn-dark"><a href="/editActivity?id={{.SimpleID}}">Edit</a></button>
+										<form method="post" enctype="multipart/form-data">
+											<input type="hidden" value="{{.SimpleID}}" name="activity_param">
+											<br>
+											<button type="submit" class="btn btn-danger" value="delete" name="action">Delete</button>
+											<button type="submit" class="btn btn-success" value="move_activity" name="action">Bottom</button>
+										</form>
+										<br>
+									</li>
+								{{end}}
+							{{end}}
+							{{range .Activities}}
+								{{if .Flag}}
 
-			{{else}}
-				<li class="list-group-item list-group-item-success">
-					<h4>{{.Name}}</h4>
-					<h5>Date of creation: {{.DateOfCreation}}</h5>
-					<h5>Date of update: {{.DateOfUpdate}}</h5>
-					<button type="button" class="btn btn-dark">
-						<a href="/editActivity?id={{.SimpleID}}">Edit</a>
-					</button>
+								{{else}}
+									<li class="list-group-item list-group-item-success">
+										<h4>{{.Name}}</h4>
+										<h5>Date of creation: {{.DateOfCreation}}</h5>
+										<h5>Date of update: {{.DateOfUpdate}}</h5>
+										<img src="/avatars/{{.ImageSrc}}" alt="Cat">
+										<br>
+										<br>
+										<button type="button" class="btn btn-dark">
+											<a href="/editActivity?id={{.SimpleID}}">Edit</a>
+										</button>
+										<br>
+										<br>
+										<form method="post" enctype="multipart/form-data">
+											<input type="hidden" value="{{.SimpleID}}" name="activity_param">
+											<button type="submit" class="btn btn-danger" value="delete" name="action">Delete</button>
+											<button type="submit" class="btn btn-warning" value="move_activity" name="action">Top</button>
+											<br><br>
+											<input type="file" class="form-control-file" name="activity_file">
+											<br>
+											<button type="submit" class="btn btn-primary" value="add_image" name="action">Add Image</button>
+										</form>
+										<br>
+									</li>
+								{{end}}
+							{{end}}
+						</ul>
+					</div>
 					<br>
+					<div style="margin-left: 35%">
+						{{$nowpage := .NowPage}}
+						{{range .Pages}}
+							{{if eq . $nowpage}}
+								<button type="button" class="btn btn-secondary">{{$nowpage}}</button>
+							{{else if .}}
+								<button type="button" class="btn btn-light"><a href="{{.}}">{{.}}</a></button>
+							{{else}}
+								<button type="button" class="btn btn-dark">-</button>
+							{{end}}
+						{{end}}
+					</div>
 					<br>
-					<form method="post" enctype="multipart/form-data">
-						<input type="hidden" value="{{.SimpleID}}" name="activity_param">
-						<button type="submit" class="btn btn-danger" value="delete" name="action">Delete</button>
-						<button type="submit" class="btn btn-warning" value="move_activity" name="action">Top</button>
-					</form>
-					<br>
-				</li>
-			{{end}}
-		{{end}}
-	</ul>
-</div>
-</body>
+				</div>
+			</div>
+		</div>
+	</body>
 </html>
