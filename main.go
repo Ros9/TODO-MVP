@@ -10,8 +10,12 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"html/template"
+	"io"
 	"log"
+	"math/rand"
+	"mime/multipart"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 )
@@ -23,14 +27,17 @@ type Activity struct{
 	DateOfCreation string `json:"date_of_creation" bson:"date_of_creation" faker:"-"`
 	DateOfUpdate string `json:"date_of_update" bson:"date_of_update" faker:"-"`
 	Flag bool `json:"flag" bson:"flag" faker:"-"`
+	ImageSrc string `json:"image_src" bson:"image_src" faker:"-"`
 }
 
 type DataOnPage struct{
 	Quantity int64
 	Activities []Activity
-	PrevPage int
-	NextPage int
+	NowPage int
+	Pages [5]int
 }
+
+const ImageHostPath = "/home/abdrasul/Development/images/"
 
 var(
 	client, _ = initMongo()
@@ -133,7 +140,7 @@ func editActivity(w http.ResponseWriter, r *http.Request){
 
 func calculateQuantityActivities() int64{
 	collection := client.Database("test").Collection("activities")
-	quantity, _ := collection.CountDocuments(context.Background(), bson.D{})
+	quantity, _ := collection.EstimatedDocumentCount(context.TODO())
 	return quantity
 }
 
@@ -185,49 +192,76 @@ func renderDataOnPage(w http.ResponseWriter, data DataOnPage, param string){
 }
 
 func stableMainPage(w http.ResponseWriter, r *http.Request, param string){
+	start := time.Now()
+	page, err := strconv.Atoi(param)
+	if err != nil{
+		fmt.Println(err.Error())
+	}
+	maxPage := int(calculateQuantityActivities() + 9) / 10
+	if page > maxPage {
+		redirectPage := "/TODO/page/" + strconv.Itoa(maxPage)
+		http.Redirect(w, r, redirectPage, 301)
+	}
 	collection := client.Database("test").Collection("activities")
-	cursor, err := collection.Find(context.TODO(), bson.M{})
+	skip := int64((page - 1) * 10)
+	limit := int64(10)
+	options := options.Find()
+	options.SetSkip(skip)
+	options.SetLimit(limit)
+	cursor, err := collection.Find(context.TODO(), bson.M{}, options)
 	defer cursor.Close(context.TODO())
 	if err != nil{
 		fmt.Println(err.Error())
 	}
-	activities := readActivitiesFromCursor(cursor)
-	upperBound, err := strconv.Atoi(param)
-	if err != nil{
-		fmt.Println(err.Error())
-	}
-	upperBound = upperBound * 10
-	lowerBound := upperBound - 9
 	data := DataOnPage{
 		Quantity:   calculateQuantityActivities(),
+		Activities: readActivitiesFromCursor(cursor),
+		NowPage: page,
 	}
-	for i:=0; i<len(activities); i++{
-		if i + 1 >= lowerBound && upperBound >= i + 1{
-			if activities[i].Flag == true {
-				data.Activities = append(data.Activities, activities[i])
-			}
+	for i:=2; i>=0; i--{
+		if page - i > 0{
+			data.Pages[2-i] = page - i
 		}
 	}
-	for i:=0; i<len(activities); i++{
-		if i + 1 >= lowerBound && upperBound >= i + 1{
-			if activities[i].Flag == false {
-				data.Activities = append(data.Activities, activities[i])
-			}
+	for i:=1; i<=2; i++{
+		if maxPage >= page + i{
+			data.Pages[2+i] = page + i
 		}
 	}
-	prevPage, err := strconv.Atoi(param)
-	if err != nil{
-		fmt.Println(err.Error())
-	}
-	prevPage = getMax(prevPage - 1, 1)
-	nextPage, err := strconv.Atoi(param)
-	if err != nil{
-		fmt.Println(err.Error())
-	}
-	nextPage = nextPage + 1
-	data.PrevPage = prevPage
-	data.NextPage = nextPage
 	renderDataOnPage(w, data, param)
+	duration := time.Since(start)
+	fmt.Println(duration)
+}
+
+func generateMD5(param string) string{
+	return param + strconv.Itoa(time.Now().Second()) + strconv.Itoa(rand.Intn(128))
+}
+
+func uploadImage(param string, file multipart.File, handler *multipart.FileHeader){
+	collection := client.Database("test").Collection("activities")
+	id, err := primitive.ObjectIDFromHex(param)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	imageSrc := generateMD5(param) + handler.Filename
+	collection.UpdateOne(
+		context.TODO(),
+		bson.D{{"_id", id}},
+		bson.D{
+			{"$set", bson.D{{"image_src", imageSrc}}},
+		},
+	)
+	dir := ImageHostPath + imageSrc
+	out, err := os.Create(dir)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	defer out.Close()
+	_, err = io.Copy(out, file)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	defer out.Close()
 }
 
 func drawMainPage(w http.ResponseWriter, r *http.Request){
@@ -246,6 +280,15 @@ func drawMainPage(w http.ResponseWriter, r *http.Request){
 			http.Redirect(w, r, redirectPage,301)
 		} else if action == "move_activity"{
 			changePriorityOfActivity(w, param)
+			http.Redirect(w, r, redirectPage,301)
+		} else if action == "add_image"{
+			file, handler, err := r.FormFile("activity_file")
+			if err != nil {
+				fmt.Println(err.Error())
+				return
+			}
+			defer file.Close()
+			uploadImage(param, file, handler)
 			http.Redirect(w, r, redirectPage,301)
 		}
 	} else{
@@ -288,11 +331,13 @@ func createFakeData(w http.ResponseWriter, r *http.Request){
 }
 
 func main(){
+	fmt.Println(calculateQuantityActivities())
 	router := mux.NewRouter()
 	router.HandleFunc("/TODO/page/{id}", drawMainPage)
 	router.HandleFunc("/editActivity", editActivity)
 	router.HandleFunc("/TODO/createFakeData/{quantity}", createFakeData)
 	http.Handle("/assets/", http.StripPrefix("/assets", http.FileServer(http.Dir("./assets"))))
+	http.Handle("/avatars/", http.StripPrefix("/avatars/", http.FileServer(http.Dir(ImageHostPath))))
 	http.Handle("/", router)
 	fmt.Println("Server is listening...")
 	http.ListenAndServe(":9000", nil)
