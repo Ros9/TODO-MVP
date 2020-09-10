@@ -1,10 +1,9 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>TODO</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css" integrity="sha384-9aIt2nRpC12Uk9gS9baDl411NQApFmC26EwAOH8WgZl5MYYxFfc+NcPb1dKGj7Sk" crossorigin="anonymous">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
-    <link rel="stylesheet" type="text/css" href="assets/styles.css">
+    <link rel="stylesheet" type="text/css" href="/assets/styles.css">
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-light bg-light">
@@ -30,19 +29,20 @@
     <div class="row">
         <div class="col">
             <div id="content">
-                <ul class="list-group">
-                    <li class="list-group-item list-group-item-success">
-                        <form method="post" enctype="multipart/form-data">
-                            <input type="text" size="20" value={{.Name}} name="activity">
-                            <button type="submit" class="btn btn-success" value="add" name="action">Update</button>
-                        </form>
+                <form method="POST" enctype="multipart/form-data">
+                    <fieldset>
+                        <div class="form-group">
+                            <input type="text" class="form-control" placeholder="Name of activity" name="activity">
+                        </div>
+                        <div class="custom-file">
+                            <input type="file" class="custom-file-input" id="customFile" name="activity_image">
+                            <label class="custom-file-label" for="customFile">Choose file</label>
+                        </div>
                         <br>
-                        <h5>Date of creation: {{.DateOfCreation}}</h5>
-                        <h5>Date of update: {{.DateOfUpdate}}</h5>
-                        <img src="/avatars/{{.ImageSrc}}" alt="Cat" style="height: 100%; width: 100%">
                         <br>
-                    </li>
-                </ul>
+                        <button type="submit" class="btn btn-primary">Submit</button>
+                    </fieldset>
+                </form>
             </div>
         </div>
     </div>
