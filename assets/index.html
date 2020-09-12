@@ -33,27 +33,15 @@
 					Filters
 				</a>
 				<div class="dropdown-menu" aria-labelledby="navbarDropdown">
-					<a class="dropdown-item" {{if ne .CurrentFilter "sort_by=date_of_creation-asc"}}
-						href="/TODO/page/{{.NowPage}}?sort_by=date_of_creation-asc"
-					{{ else if eq .CurrentFilter "sort_by=date_of_creation-asc"}}
-						href="/TODO/page/{{.NowPage}}?sort_by=date_of_creation-desc"
-					{{end}}>sort by date of creation</a>
-					<a class="dropdown-item" {{if ne .CurrentFilter "sort_by=likes-asc"}}
-						href="/TODO/page/{{.NowPage}}?sort_by=likes-asc"
-					{{ else if  eq .CurrentFilter "sort_by=likes-asc"}}
-						href="/TODO/page/{{.NowPage}}?sort_by=likes-desc"
-					{{end}}>sort by likes</a>
-					<a class="dropdown-item" {{if ne .CurrentFilter "sort_by=dislikes-asc"}}
-						href="/TODO/page/{{.NowPage}}?sort_by=dislikes-asc"
-					{{ else if eq .CurrentFilter "sort_by=dislikes-asc"}}
-						href="/TODO/page/{{.NowPage}}?sort_by=dislikes-desc"
-					{{end}}>sort by dislikes</a>
+					{{range .Filters}}
+						<a class="dropdown-item" href="{{.}}">{{.}}</a>
+					{{end}}
 				</div>
 			</li>
 		</ul>
-		<form class="form-inline my-2 my-lg-0" method="post" enctype="multipart/form-data">
-			<input class="form-control mr-sm-2" type="text" placeholder="{{.RequestedActivity}}" aria-label="Search" name="activity_param">
-			<button class="btn btn-outline-success my-2 my-sm-0" type="submit" value="search" name="action">Search</button>
+		<form class="form-inline my-2 my-lg-0" method="get" enctype="multipart/form-data">
+			<input class="form-control mr-sm-2" type="text" placeholder="" aria-label="Search" name="search">
+			<button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
 		</form>
 	</div>
 </nav>
@@ -136,7 +124,7 @@
 					{{if eq .Index $nowpage}}
 						<button type="button" class="btn btn-secondary">{{$nowpage}}</button>
 					{{else if .Index}}
-						<button type="button" class="btn btn-light"><a href="{{.Link}}">{{.Index}}</a></button>
+						<button type="button" class="btn btn-light"><a href="/TODO/page/{{.Link}}">{{.Index}}</a></button>
 					{{else}}
 						<button type="button" class="btn btn-dark">-</button>
 					{{end}}
