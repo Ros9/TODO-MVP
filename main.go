@@ -45,8 +45,11 @@ type DataOnPage struct{
 	Pages [5] PageLink
 	RequestedActivity string
 	CurrentFilter string
+	FiltersPageLink template.URL
 	MostLikedActivities[] Activity
+	Filters [3] template.URL
 }
+
 
 const ImageHostPath = "/home/abdrasul/Development/images/"
 
@@ -118,7 +121,7 @@ func searchActivity(w http.ResponseWriter, param string){
 	answer, _ := collection.Find(context.TODO(), bson.D{{"$text", bson.D{{"$search", param}}}})
 	defer answer.Close(context.TODO())
 	data := DataOnPage{
-		Quantity: calculateQuantityActivities(),
+		Quantity: calculateQuantityActivities(""),
 		Activities: readActivitiesFromCursor(answer),
 		RequestedActivity: param,
 	}
@@ -209,9 +212,12 @@ func addImageOfActivity(idsOfInsertedActivities []mongo.InsertOneResult, file mu
 	}
 }
 
-func calculateQuantityActivities() int64{
+func calculateQuantityActivities(name string) int64{
 	collection := client.Database("test").Collection("activities")
 	quantity, _ := collection.EstimatedDocumentCount(context.TODO())
+	if len(name) > 0{
+		quantity, _ = collection.CountDocuments(context.TODO(), bson.D{{"name", name}})
+	}
 	return quantity
 }
 
@@ -257,21 +263,27 @@ func renderData(w http.ResponseWriter, data DataOnPage){
 	temp.Execute(w, data)
 }
 
-func renderDataOnPage(w http.ResponseWriter, data DataOnPage, param string){
+func renderDataOnPage(w http.ResponseWriter, data DataOnPage){
 	temp, _ := template.ParseFiles("assets/index.html")
 	temp.Execute(w, data)
 }
 
-func stableMainPage(w http.ResponseWriter, r *http.Request, param string){
+func stableMainPage(w http.ResponseWriter, r *http.Request){
+	vars := mux.Vars(r)
+	fmt.Println("URL of stable page = ", r.URL)
+	fmt.Println("search = ", r.URL.Query().Get("search"))
+	searchParam := r.URL.Query().Get("search")
 	sortBy := r.URL.Query().Get("sort_by")
 	fmt.Println("sort_by = ", sortBy)
 	start := time.Now()
-	page, err := strconv.Atoi(param)
+	page, err := strconv.Atoi(vars["id"])
 	if err != nil{
 		fmt.Println(err.Error())
 	}
-	maxPage := int(calculateQuantityActivities() + 9) / 10
-	if page > maxPage {
+	maxPage := int(calculateQuantityActivities(searchParam) + 9) / 10
+	if maxPage == 0{
+		maxPage = 1
+	} else if page > maxPage{
 		redirectPage := "/TODO/page/" + strconv.Itoa(maxPage)
 		http.Redirect(w, r, redirectPage, 301)
 	}
@@ -280,7 +292,7 @@ func stableMainPage(w http.ResponseWriter, r *http.Request, param string){
 	limit := int64(10)
 	options := options.Find()
 	options.SetSkip(skip)
-	options.SetLimit(limit)
+	options.SetLimit(limit)	
 	var currentFilter string
 	sortOptions := strings.Split(sortBy, "-")
 	if len(sortOptions) == 2{
@@ -294,38 +306,81 @@ func stableMainPage(w http.ResponseWriter, r *http.Request, param string){
 			currentFilter = "sort_by=" + sortBy
 		}
 	}
-	cursor, err := collection.Find(context.TODO(), bson.M{}, options)
-	defer cursor.Close(context.TODO())
+	fmt.Println("currentFilter =====> ", currentFilter)
+	searchFilter := bson.D{{}}
+	if len(searchParam) > 0{
+		searchFilter = bson.D{{"name", searchParam}}
+	}
+	cursor, err := collection.Find(context.TODO(), searchFilter, options)
 	if err != nil{
 		fmt.Println(err.Error())
 	}
 	data := DataOnPage{
-		Quantity:   calculateQuantityActivities(),
+		Quantity:   calculateQuantityActivities(searchParam),
 		Activities: readActivitiesFromCursor(cursor),
 		NowPage: page,
 		RequestedActivity: "Search",
 		CurrentFilter: currentFilter,
 	}
+	if len(searchParam) == 0{
+		data.Filters[0] = "?sort_by=date_of_creation-asc"
+		data.Filters[1] = "?sort_by=likes-asc"
+		data.Filters[2] = "?sort_by=dislikes-asc"
+	} else{
+		data.Filters[0] = template.URL("?search=" + searchParam + "&sort_by=date_of_creation-asc")
+		data.Filters[1] = template.URL("?search=" + searchParam + "&sort_by=likes-asc")
+		data.Filters[2] = template.URL("?search=" + searchParam + "&sort_by=dislikes-asc")
+	}
+	if len(currentFilter) > 0{
+		for i:=0; i<=2; i++{
+			tempFilter := string(data.Filters[i])
+			if strings.HasSuffix(tempFilter, currentFilter) == true{
+				if strings.HasSuffix(tempFilter, "asc"){
+					data.Filters[i] = template.URL(strings.TrimRight(tempFilter, "asc") + "desc")
+				} else{
+					data.Filters[i] = template.URL(strings.TrimRight(tempFilter, "desc") + "asc")
+				}
+			}
+		}
+	}
+	fmt.Println(currentFilter)
 	options.SetSkip(0)
 	options.SetLimit(10)
 	options.SetSort(bson.D{{"Likes", -1}})
-	cursor, err = collection.Find(context.TODO(), bson.M{}, options)
+	cursor, err = collection.Find(context.TODO(), bson.D{{}}, options)
 	data.MostLikedActivities = readActivitiesFromCursor(cursor)
 	for i:=2; i>=0; i--{
 		if page - i > 0{
 			data.Pages[2-i].Index = page - i
-			data.Pages[2-i].Link = template.URL(strconv.Itoa(page - i) + "?" + currentFilter)
+			data.Pages[2-i].Link = template.URL(strconv.Itoa(page - i))
+			if len(searchParam) == 0{
+				data.Pages[2-i].Link = data.Pages[2-i].Link + template.URL("?" + currentFilter)
+			} else{
+				data.Pages[2-i].Link = data.Pages[2-i].Link + template.URL("?search="+searchParam)
+				if len(searchParam) > 0 && len(currentFilter) > 0{
+					data.Pages[2-i].Link = data.Pages[2-i].Link + template.URL("&" + currentFilter)
+				}
+			}
 		}
 	}
 	for i:=1; i<=2; i++{
 		if maxPage >= page + i{
 			data.Pages[2+i].Index = page + i
-			data.Pages[2+i].Link = template.URL(strconv.Itoa(page + i) + "?" + currentFilter)
+			data.Pages[2+i].Link = template.URL(strconv.Itoa(page + i))
+			if len(searchParam) == 0{
+				data.Pages[2+i].Link = data.Pages[2+i].Link + template.URL("?" + currentFilter)
+			} else{
+				data.Pages[2+i].Link = data.Pages[2+i].Link + template.URL("?search="+searchParam)
+				if len(searchParam) > 0 && len(currentFilter) > 0{
+					data.Pages[2+i].Link = data.Pages[2+i].Link + template.URL("&" + currentFilter)
+				}
+			}
 		}
 	}
-	renderDataOnPage(w, data, param)
+	renderDataOnPage(w, data)
 	duration := time.Since(start)
 	fmt.Println("time for filters = ", duration)
+	fmt.Println()
 }
 
 func generateMD5(param string) string{
@@ -422,7 +477,7 @@ func drawMainPage(w http.ResponseWriter, r *http.Request){
 			http.Redirect(w, r, redirectPage, 301)
 		}
 	} else{
-		stableMainPage(w, r, vars["id"])
+		stableMainPage(w, r)
 	}
 }
 
