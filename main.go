@@ -48,8 +48,14 @@ type DataOnPage struct{
 	FiltersPageLink template.URL
 	MostLikedActivities[] Activity
 	Filters [3] template.URL
+	SearchName string
+	SearchValue string
 }
 
+type SearchContainer struct{
+	Search string
+	Filters [3]string
+}
 
 const ImageHostPath = "/home/abdrasul/Development/images/"
 
@@ -71,6 +77,48 @@ func getMax(x, y int) int{
 	return y
 }
 
+func getNowTime() string{
+	return time.Now().Format("2006.01.02 15:04:05")
+}
+
+func checkDirOfFilter(dir string) int{
+	if dir == "desc"{
+		return -1
+	}
+	return 1
+}
+
+func generateMD5(param string) string{
+	return param + strconv.Itoa(time.Now().Second()) + strconv.Itoa(rand.Intn(128))
+}
+
+func getSearchContainerFromRequest(r *http.Request) SearchContainer{
+	var filters [3]string
+	for i:=1; i<=3; i++{
+		filters[i-1] = r.URL.Query().Get("filter" + strconv.Itoa(i))
+	}
+	container := SearchContainer{
+		Search: r.URL.Query().Get("search"),
+		Filters: filters,
+	}
+	return container
+}
+
+func searchContainerToURLQuery(container *SearchContainer) string{
+	url := make([]string, 0)
+	if container.Search != ""{
+		url = append(url, "search=" + container.Search)
+	}
+	cnt := 1
+	for i:=0; i<len(container.Filters); i++{
+		if container.Filters[i] != ""{
+			url = append(url, "filter" + strconv.Itoa(cnt) + "=" + container.Filters[i])
+			cnt++
+		}
+	}
+	return strings.Join(url, "&")
+}
+
 func initMongo() (*mongo.Client, error){
 	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
 	client, err := mongo.Connect(context.TODO(), clientOptions)
@@ -85,10 +133,6 @@ func initMongo() (*mongo.Client, error){
 	return client, nil
 }
 
-func getNowTime() string{
-	return time.Now().Format("2006.01.02 15:04:05")
-}
-
 func addActivity(param string) []mongo.InsertOneResult{
 	activities := make([]Activity, 1)
 	activities[0].Name = param
@@ -101,8 +145,6 @@ func addActivity(param string) []mongo.InsertOneResult{
 	return uploadActivitiesToDataBase(activities)
 }
 
-
-
 func deleteActivity(param string){
 	id, err := primitive.ObjectIDFromHex(param)
 	if err != nil{
@@ -113,20 +155,6 @@ func deleteActivity(param string){
 	if err != nil{
 		fmt.Println(err.Error())
 	}
-}
-
-func searchActivity(w http.ResponseWriter, param string){
-	start := time.Now()
-	collection := client.Database("test").Collection("activities")
-	answer, _ := collection.Find(context.TODO(), bson.D{{"$text", bson.D{{"$search", param}}}})
-	defer answer.Close(context.TODO())
-	data := DataOnPage{
-		Quantity: calculateQuantityActivities(""),
-		Activities: readActivitiesFromCursor(answer),
-		RequestedActivity: param,
-	}
-	renderData(w, data)
-	fmt.Println("Time for search activity = ", time.Since(start))
 }
 
 func editActivity(w http.ResponseWriter, r *http.Request){
@@ -258,11 +286,6 @@ func readActivitiesFromCursor(cursor *mongo.Cursor) []Activity{
 	return data
 }
 
-func renderData(w http.ResponseWriter, data DataOnPage){
-	temp, _ := template.ParseFiles("assets/index.html")
-	temp.Execute(w, data)
-}
-
 func renderDataOnPage(w http.ResponseWriter, data DataOnPage){
 	temp, _ := template.ParseFiles("assets/index.html")
 	temp.Execute(w, data)
@@ -270,121 +293,69 @@ func renderDataOnPage(w http.ResponseWriter, data DataOnPage){
 
 func stableMainPage(w http.ResponseWriter, r *http.Request){
 	vars := mux.Vars(r)
-	fmt.Println("URL of stable page = ", r.URL)
-	fmt.Println("search = ", r.URL.Query().Get("search"))
-	searchParam := r.URL.Query().Get("search")
-	sortBy := r.URL.Query().Get("sort_by")
-	fmt.Println("sort_by = ", sortBy)
+	filtersOfContent := make([][]string, 3)
+	container := getSearchContainerFromRequest(r)
+	currentFilter := searchContainerToURLQuery(&container)
+	fmt.Println("search = ", container.Search)
+	for i:=1; i<=3; i++{
+		filtersOfContent[i-1] = strings.Split(r.URL.Query().Get("filter" + strconv.Itoa(i)), "-")
+	}
 	start := time.Now()
 	page, err := strconv.Atoi(vars["id"])
 	if err != nil{
 		fmt.Println(err.Error())
 	}
-	maxPage := int(calculateQuantityActivities(searchParam) + 9) / 10
+	maxPage := int(calculateQuantityActivities(container.Search) + 9) / 10
 	if maxPage == 0{
 		maxPage = 1
-	} else if page > maxPage{
-		redirectPage := "/TODO/page/" + strconv.Itoa(maxPage)
-		http.Redirect(w, r, redirectPage, 301)
 	}
 	collection := client.Database("test").Collection("activities")
 	skip := int64((page - 1) * 10)
 	limit := int64(10)
 	options := options.Find()
 	options.SetSkip(skip)
-	options.SetLimit(limit)	
-	var currentFilter string
-	sortOptions := strings.Split(sortBy, "-")
-	if len(sortOptions) == 2{
-		sortFilter := sortOptions[0]
-		sortDirection := 1
-		if sortOptions[1] == "desc"{
-			sortDirection = -1
-		}
-		if sortFilter == "likes" || sortFilter == "dislikes" || sortFilter == "date_of_creation"{
-			options.SetSort(bson.D{{sortFilter, sortDirection}})
-			currentFilter = "sort_by=" + sortBy
-		}
+	options.SetLimit(limit)
+	options.SetSort(bson.D{{"flag", -1}})
+	if len(filtersOfContent[0][0]) > 0{
+		options.SetSort(bson.D{{"flag", -1},
+			{filtersOfContent[0][0], checkDirOfFilter(filtersOfContent[0][1])},
+			{filtersOfContent[1][0], checkDirOfFilter(filtersOfContent[1][1])},
+			{filtersOfContent[2][0], checkDirOfFilter(filtersOfContent[2][1])}})
 	}
-	fmt.Println("currentFilter =====> ", currentFilter)
 	searchFilter := bson.D{{}}
-	if len(searchParam) > 0{
-		searchFilter = bson.D{{"name", searchParam}}
+	if len(container.Search) > 0{
+		searchFilter = bson.D{{"name", container.Search}}
 	}
 	cursor, err := collection.Find(context.TODO(), searchFilter, options)
 	if err != nil{
 		fmt.Println(err.Error())
 	}
 	data := DataOnPage{
-		Quantity:   calculateQuantityActivities(searchParam),
+		Quantity:   calculateQuantityActivities(container.Search),
 		Activities: readActivitiesFromCursor(cursor),
 		NowPage: page,
 		RequestedActivity: "Search",
 		CurrentFilter: currentFilter,
 	}
-	if len(searchParam) == 0{
-		data.Filters[0] = "?sort_by=date_of_creation-asc"
-		data.Filters[1] = "?sort_by=likes-asc"
-		data.Filters[2] = "?sort_by=dislikes-asc"
-	} else{
-		data.Filters[0] = template.URL("?search=" + searchParam + "&sort_by=date_of_creation-asc")
-		data.Filters[1] = template.URL("?search=" + searchParam + "&sort_by=likes-asc")
-		data.Filters[2] = template.URL("?search=" + searchParam + "&sort_by=dislikes-asc")
+	if len(container.Search) > 0{
+		data.SearchName = "search"
+		data.SearchValue = container.Search
 	}
-	if len(currentFilter) > 0{
-		for i:=0; i<=2; i++{
-			tempFilter := string(data.Filters[i])
-			if strings.HasSuffix(tempFilter, currentFilter) == true{
-				if strings.HasSuffix(tempFilter, "asc"){
-					data.Filters[i] = template.URL(strings.TrimRight(tempFilter, "asc") + "desc")
-				} else{
-					data.Filters[i] = template.URL(strings.TrimRight(tempFilter, "desc") + "asc")
-				}
-			}
-		}
-	}
-	fmt.Println(currentFilter)
+	fmt.Println(container.Search)
 	options.SetSkip(0)
 	options.SetLimit(10)
-	options.SetSort(bson.D{{"Likes", -1}})
 	cursor, err = collection.Find(context.TODO(), bson.D{{}}, options)
 	data.MostLikedActivities = readActivitiesFromCursor(cursor)
-	for i:=2; i>=0; i--{
-		if page - i > 0{
-			data.Pages[2-i].Index = page - i
-			data.Pages[2-i].Link = template.URL(strconv.Itoa(page - i))
-			if len(searchParam) == 0{
-				data.Pages[2-i].Link = data.Pages[2-i].Link + template.URL("?" + currentFilter)
-			} else{
-				data.Pages[2-i].Link = data.Pages[2-i].Link + template.URL("?search="+searchParam)
-				if len(searchParam) > 0 && len(currentFilter) > 0{
-					data.Pages[2-i].Link = data.Pages[2-i].Link + template.URL("&" + currentFilter)
-				}
-			}
-		}
-	}
-	for i:=1; i<=2; i++{
-		if maxPage >= page + i{
-			data.Pages[2+i].Index = page + i
-			data.Pages[2+i].Link = template.URL(strconv.Itoa(page + i))
-			if len(searchParam) == 0{
-				data.Pages[2+i].Link = data.Pages[2+i].Link + template.URL("?" + currentFilter)
-			} else{
-				data.Pages[2+i].Link = data.Pages[2+i].Link + template.URL("?search="+searchParam)
-				if len(searchParam) > 0 && len(currentFilter) > 0{
-					data.Pages[2+i].Link = data.Pages[2+i].Link + template.URL("&" + currentFilter)
-				}
-			}
+	for i:=-2; i<=2; i++{
+		if page + i > 0 && maxPage >= page + i{
+			data.Pages[2 + i].Index = page + i
+			data.Pages[2 + i].Link = template.URL(strconv.Itoa(page + i)) + template.URL("?" + currentFilter)
 		}
 	}
 	renderDataOnPage(w, data)
 	duration := time.Since(start)
 	fmt.Println("time for filters = ", duration)
 	fmt.Println()
-}
-
-func generateMD5(param string) string{
-	return param + strconv.Itoa(time.Now().Second()) + strconv.Itoa(rand.Intn(128))
 }
 
 func uploadImage(param string, file multipart.File, header *multipart.FileHeader){
@@ -444,14 +415,11 @@ func dislikeActivity(param string){
 }
 
 func drawMainPage(w http.ResponseWriter, r *http.Request){
-	vars := mux.Vars(r)
 	if r.Method == "POST"{
 		action := r.FormValue("action")
 		param := r.FormValue("activity_param")
-		redirectPage := "/TODO/page/" + vars["id"]
-		if action == "search"{
-			searchActivity(w, param)
-		} else if action == "add"{
+		redirectPage := r.URL.String()
+		if action == "add"{
 			addActivity(param)
 			http.Redirect(w, r, redirectPage,301)
 		} else if action == "delete"{
